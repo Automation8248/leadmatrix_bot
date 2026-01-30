@@ -17,9 +17,9 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 # Goal per run (Kitni leads milne par rukna hai)
-TARGET_LEADS = 3
+TARGET_LEADS = 8
 # Max cities to check if leads not found
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 20
 
 # 🌍 DOLLAR LOCATIONS (USA, Canada, Australia)
 LOCATIONS = [
