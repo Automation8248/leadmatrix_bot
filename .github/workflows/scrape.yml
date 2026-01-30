@@ -31,11 +31,13 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # Force add files if they exist
+          # Agar history.json hai to add karo
           git add history.json || true
+          
+          # Agar leads.csv nahi bani (kyunki leads nahi mili), to error mat do
           git add leads.csv || true
           
-          # Commit only if there are changes, else skip silently
-          git commit -m "New Leads Found" || echo "No new leads to save"
+          # Agar koi changes hain to commit karo, warna "No changes" bolkar aage badho
+          git commit -m "Auto Update: Scraped Data" || echo "No changes to commit"
           
           git push
