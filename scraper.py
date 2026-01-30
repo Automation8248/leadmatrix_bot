@@ -16,12 +16,14 @@ from selenium.webdriver.common.by import By
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# Goal per run
+# Goal per run (Kitni leads milne par rukna hai)
 TARGET_LEADS = 3
+# Max cities to check if leads not found
 MAX_ATTEMPTS = 5
 
-# 🌍 LOCATIONS (USA + Dollar Countries)
+# 🌍 DOLLAR LOCATIONS (USA, Canada, Australia)
 LOCATIONS = [
+    # USA (Top Cities)
     "New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Phoenix, AZ",
     "Philadelphia, PA", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA",
     "Austin, TX", "Jacksonville, FL", "Fort Worth, TX", "Columbus, OH", "Charlotte, NC",
@@ -30,10 +32,13 @@ LOCATIONS = [
     "Las Vegas, NV", "Memphis, TN", "Louisville, KY", "Baltimore, MD", "Milwaukee, WI",
     "Albuquerque, NM", "Tucson, AZ", "Fresno, CA", "Mesa, AZ", "Atlanta, GA",
     "Sacramento, CA", "Kansas City, MO", "Miami, FL", "Raleigh, NC", "Omaha, NE",
-    "Toronto, Ontario", "Vancouver, BC", "Montreal, Quebec", "Sydney, NSW", "Melbourne, VIC"
+    # Canada
+    "Toronto, Ontario", "Vancouver, BC", "Montreal, Quebec", "Calgary, Alberta",
+    # Australia
+    "Sydney, NSW", "Melbourne, VIC", "Brisbane, QLD", "Perth, WA"
 ]
 
-# 🏥 TOPICS (High Intent)
+# 🏥 HIGH INTENT TOPICS
 TOPICS = [
     "Salon", "Barber Shop", "Spa", "Nail Salon", "Gym", "Yoga Studio",
     "Dentist", "Chiropractor", "Veterinarian", "Dermatologist", "Physiotherapy",
@@ -62,23 +67,30 @@ def get_driver():
     stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
     return driver
 
-# --- 🧠 SMART ROTATION LOGIC ---
+# --- 🧠 SMART ROTATION LOGIC (Unique Topic per City) ---
 def get_smart_target():
+    # 1. Load purani history (kya check ho chuka hai)
     if os.path.exists('combinations.json'):
         with open('combinations.json', 'r') as f: done_combos = json.load(f)
     else:
         done_combos = []
 
+    # 2. Saare possible combinations banao (City x Topic)
     all_possible = [f"{city}|{topic}" for city in LOCATIONS for topic in TOPICS]
+    
+    # 3. Jo ho chuke hain unhe hata do
     remaining = list(set(all_possible) - set(done_combos))
     
+    # 4. Agar sab khatam ho gaya to Reset karo
     if not remaining:
         done_combos = []
         remaining = all_possible
 
+    # 5. Random naya select karo
     selection = random.choice(remaining)
     city, topic = selection.split('|')
     
+    # 6. Save karo taki agli bar repeat na ho
     done_combos.append(selection)
     with open('combinations.json', 'w') as f: json.dump(done_combos, f)
     
@@ -95,9 +107,10 @@ def run_scraper():
     attempts = 0
     scraped_data = []
 
+    # 🔄 MAIN LOOP: Jab tak 3 leads na mile ya 5 cities check na kar le
     while total_leads_found < TARGET_LEADS and attempts < MAX_ATTEMPTS:
         attempts += 1
-        city, topic = get_smart_target()
+        city, topic = get_smart_target() # <--- Yahan Smart Rotation call ho raha hai
         query = f"{topic} in {city}"
         
         print(f"\n🔄 Attempt {attempts}: Searching '{query}'")
@@ -106,12 +119,14 @@ def run_scraper():
             driver.get(f"https://www.google.com/maps/search/{query.replace(' ', '+')}")
             time.sleep(5)
             
+            # Scroll Feed
             try:
                 feed = driver.find_element(By.CSS_SELECTOR, "div[role='feed']")
                 driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", feed)
                 time.sleep(3)
             except: pass
 
+            # Top 15 Results Check
             listings = driver.find_elements(By.CSS_SELECTOR, "a.hfpxzc")[:15]
             
             for listing in listings:
@@ -122,6 +137,7 @@ def run_scraper():
                     name = driver.find_element(By.TAG_NAME, "h1").text
                     if name in history: continue 
 
+                    # Extract Details
                     try: website = driver.find_element(By.CSS_SELECTOR, "a[data-item-id='authority']").get_attribute("href")
                     except: website = ""
 
@@ -134,14 +150,18 @@ def run_scraper():
                         reviews = rating_text.split("\n")[1]
                     except: rating = "N/A"; reviews = "(0)"
 
+                    # --- GOLD FILTER ---
                     is_gold = False
                     status = "✅ Active"
                     
+                    # Condition 1: Website Gayab Hai
                     if not website:
                         is_gold = True; status = "❌ No Website (GOLD)"
-                    elif any(x in website.lower() for x in ['facebook.com', 'wix.com', 'business.site']):
+                    # Condition 2: Website Bekaar Hai (FB/Wix)
+                    elif any(x in website.lower() for x in ['facebook.com', 'wix.com', 'business.site', 'wordpress.com']):
                         is_gold = True; status = f"⚠️ Weak ({website})"
 
+                    # Condition 3: Reviews 15+ hone chahiye
                     review_count = int(''.join(filter(str.isdigit, reviews))) if any(c.isdigit() for c in reviews) else 0
 
                     if is_gold and review_count >= 15:
@@ -158,6 +178,7 @@ def run_scraper():
                         scraped_data.append({"Name": name, "Category": topic, "City": city, "Phone": phone, "Website": status})
                         history.append(name)
                         total_leads_found += 1
+                        print(f"   ✅ FOUND: {name}")
                         
                         if total_leads_found >= TARGET_LEADS: break
                 
@@ -166,13 +187,16 @@ def run_scraper():
 
     driver.quit()
 
+    # Save History & New Combinations
     with open('history.json', 'w') as f: json.dump(history, f)
     
     if scraped_data:
         df = pd.DataFrame(scraped_data)
         df.to_csv('leads.csv', mode='a', index=False, header=not os.path.exists('leads.csv'))
 
-    send_telegram(f"📊 *REPORT:* Checked {attempts} cities. Found {total_leads_found} GOLD leads.")
+    # Final Report
+    report_msg = f"📊 *REPORT:* Checked {attempts} locations. Found {total_leads_found} GOLD leads."
+    send_telegram(report_msg)
 
 if __name__ == "__main__":
     run_scraper()
