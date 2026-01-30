@@ -10,64 +10,32 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from datetime import date
 
 # --- CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# 1. Target Locations (USA Major Cities)
-CITIES = [
-    "Houston, TX", "Los Angeles, CA", "Miami, FL", "Chicago, IL", 
-    "Phoenix, AZ", "Dallas, TX", "Atlanta, GA", "Denver, CO", 
-    "Seattle, WA", "Las Vegas, NV", "Orlando, FL", "Austin, TX"
-]
+# Topics aur Places ki list
+CITIES = ["New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Miami, FL", "Las Vegas, NV"]
+TOPICS = ["Salon", "Plumber", "Dentist", "Auto Repair", "Real Estate Agency", "Gym", "Florist", "Electrician"]
 
-# 2. Master Category List (Top 5 Priority First)
-CATEGORIES = [
-    # --- 🔥 TOP 5 (High Conversion) ---
-    "Salon", "Auto Repair Shop", "Restaurant", "Dental Clinic", "Grocery Store",
-    
-    # --- 🏪 Retail ---
-    "Liquor Store", "Bakery", "Furniture Store", "Boutique", "Jewelry Store", "Florist",
-    
-    # --- 🏠 Home Services ---
-    "Plumber", "Electrician", "HVAC Repair", "Landscaping Service", "Roofing Service",
-    
-    # --- 🏗️ Construction ---
-    "General Contractor", "Interior Designer", "Real Estate Agency",
-    
-    # --- 💇 Beauty & Wellness ---
-    "Barber Shop", "Spa", "Gym", "Nail Salon", "Massage Therapist",
-    
-    # --- ⚖️ Professional ---
-    "Law Firm", "Accountant", "Insurance Agency"
-]
-
-def send_telegram(category, lead):
-    # Telegram Format: CLEAN CARD with BOLD HEADING
+def send_telegram(topic, lead):
     msg = (
-        f"🟦 *{category.upper()}* 🇺🇸\n\n"
-        f"🏪 *Business:* {lead['Name']}\n"
+        f"🟦 *{topic.upper()} LEAD* 🇺🇸\n\n"
+        f"🏪 *Name:* {lead['Name']}\n"
         f"📞 *Phone:* `{lead['Phone']}`\n"
-        f"📧 *Email:* `{lead['Email']}`\n"
-        f"📍 *Location:* {lead['Address']}\n"
-        f"🌐 *Website:* {lead['WebsiteStatus']}\n"
-        f"⭐ *Rating:* {lead['Rating']} ({lead['Reviews']} reviews)\n"
-        f"🔗 [Google Maps Link]({lead['MapLink']})\n\n"
-        f"📅 *Scraped:* {date.today()}"
+        f"🌐 *Web:* {lead['WebsiteStatus']}\n"
+        f"⭐ *Rating:* {lead['Rating']} ({lead['Reviews']})\n"
+        f"📍 *Addr:* {lead['Address']}\n"
+        f"🔗 [Maps Link]({lead['MapLink']})"
     )
-    
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID, 
-        "text": msg, 
-        "parse_mode": "Markdown", 
-        "disable_web_page_preview": True
-    }
+    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": True}
     requests.post(url, json=payload)
 
-def get_stealth_driver():
+def get_driver():
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--window-size=1920,1080")
@@ -77,126 +45,110 @@ def get_stealth_driver():
     options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    stealth(driver,
-        languages=["en-US", "en"],
-        vendor="Google Inc.",
-        platform="Win32",
-        webgl_vendor="Intel Inc.",
-        renderer="Intel Iris OpenGL Engine",
-        fix_hairline=True,
-    )
+    stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
     return driver
 
 def run_scraper():
-    driver = get_stealth_driver()
+    driver = get_driver()
     
-    # Randomly pick 1 City and 1 Category to keep it natural
-    target_city = random.choice(CITIES)
-    target_category = random.choice(CATEGORIES)
-    search_query = f"{target_category} in {target_city}"
-    
-    print(f"🚀 Searching: {search_query}...")
-    
-    # Google Maps Search URL
-    driver.get(f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}/")
-    time.sleep(random.uniform(4, 7))
+    # 1. Random Selection
+    city = random.choice(CITIES)
+    topic = random.choice(TOPICS)
+    query = f"{topic} in {city}"
+    print(f"🔎 Searching: {query}")
 
-    # Load History
+    driver.get(f"https://www.google.com/maps/search/{query.replace(' ', '+')}")
+    time.sleep(5)
+
+    # 2. History Load
     if os.path.exists('history.json'):
         with open('history.json', 'r') as f: history = json.load(f)
     else: history = []
 
     leads_found = []
 
-    # 🖱️ Scroll mimics Human behavior
-    print("👀 Scrolling to find businesses...")
-    for _ in range(3):
+    # 3. Scroll Feed (To load more results)
+    try:
+        feed = driver.find_element(By.CSS_SELECTOR, "div[role='feed']")
+        driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", feed)
+        time.sleep(3)
+    except: pass
+
+    # 4. Find Listings (Using generic selector)
+    # Class 'hfpxzc' is often the clickable link for businesses on Maps
+    listings = driver.find_elements(By.CSS_SELECTOR, "a.hfpxzc")[:10]
+
+    for listing in listings:
         try:
-            scrollable_div = driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
-            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
+            # Click the listing to open details
+            listing.click()
             time.sleep(random.uniform(2, 4))
-        except:
-            pass # Sometimes feed isn't immediately found
+            
+            # Scrape Details from the Side Panel
+            name = driver.find_element(By.TAG_NAME, "h1").text
+            
+            if name in history: continue
 
-    # Extract Elements (Generic Selector for Cards)
-    # Note: Selectors like Nv2Ybe can change. Using generic class structure.
-    items = driver.find_elements(By.CSS_SELECTOR, "div[role='article']")[:12] # Limit to 12 per run for safety
-
-    for item in items:
-        try:
-            # Basic Data Extraction
-            name = item.get_attribute("aria-label")
-            if not name or name in history: continue
-
-            # Click to open details
-            item.click()
-            time.sleep(random.uniform(2, 4))
-
-            # Extract Phone & Website
             try:
-                phone_elem = driver.find_element(By.CSS_SELECTOR, "button[data-item-id^='phone:']")
-                phone = phone_elem.get_attribute("aria-label").replace("Phone: ", "")
+                phone = driver.find_element(By.CSS_SELECTOR, "button[data-item-id^='phone:']").get_attribute("aria-label").replace("Phone: ", "")
             except: phone = "Not Listed"
 
             try:
-                web_elem = driver.find_element(By.CSS_SELECTOR, "a[data-item-id='authority']")
-                website = web_elem.get_attribute("href")
+                website_btn = driver.find_element(By.CSS_SELECTOR, "a[data-item-id='authority']")
+                website = website_btn.get_attribute("href")
             except: website = ""
 
             try:
-                rating_text = item.find_element(By.CSS_SELECTOR, "span[role='img']").get_attribute("aria-label")
-                # Format: "4.5 stars 50 reviews"
-                rating = rating_text.split(" ")[0]
-                reviews = int(rating_text.split("(")[1].split(")")[0].replace(",",""))
+                rating_text = driver.find_element(By.CSS_SELECTOR, "div.F7nice").text
+                rating = rating_text.split("\n")[0]
+                reviews = rating_text.split("\n")[1]
             except: 
-                rating = "N/A"
-                reviews = 0
+                rating = "0"
+                reviews = "(0)"
 
-            # --- 🧠 SMART FILTER LOGIC ---
-            is_gold_lead = False
-            website_status = "🌐 Active"
-
-            # Condition 1: No Website OR "Bad" Website (FB, Wix, Site.google)
-            bad_domains = ['facebook.com', 'wix.com', 'business.site', 'wordpress.com']
+            # 5. GOLD FILTER (Website Missing or Weak)
+            is_gold = False
+            status = "✅ Active"
+            
             if not website:
-                is_gold_lead = True
-                website_status = "❌ No Website (GOLD)"
-            elif any(domain in website for domain in bad_domains):
-                is_gold_lead = True
-                website_status = f"⚠️ Weak ({website})"
+                is_gold = True
+                status = "❌ No Website (GOLD)"
+            elif "facebook.com" in website or "wix.com" in website:
+                is_gold = True
+                status = "⚠️ Weak Website"
 
-            # Condition 2: Reviews >= 20 (Established Business)
-            if is_gold_lead and reviews >= 20:
-                lead_data = {
+            # Check reviews count (Clean string first)
+            review_count = int(''.join(filter(str.isdigit, reviews))) if any(c.isdigit() for c in reviews) else 0
+
+            if is_gold and review_count >= 10:
+                lead = {
                     "Name": name,
                     "Phone": phone,
-                    "Email": "Not Found (Manual Check Required)", # Maps rarely has email
-                    "Address": target_city,
-                    "WebsiteStatus": website_status,
+                    "WebsiteStatus": status,
                     "Rating": rating,
                     "Reviews": reviews,
+                    "Address": city,
                     "MapLink": driver.current_url
                 }
                 
-                send_telegram(target_category, lead_data)
-                leads_found.append(lead_data)
+                send_telegram(topic, lead)
+                leads_found.append(lead)
                 history.append(name)
-                print(f"✅ Lead Sent: {name}")
-                time.sleep(random.uniform(5, 10)) # Delay between sends
-
+                print(f"🚀 Sent: {name}")
+        
         except Exception as e:
-            # print(f"Skipping item due to: {e}") 
+            # print(e)
             continue
+
+    driver.quit()
 
     # Save Data
     with open('history.json', 'w') as f: json.dump(history, f)
     
     if leads_found:
         df = pd.DataFrame(leads_found)
+        # Append mode to keep previous leads
         df.to_csv('leads.csv', mode='a', index=False, header=not os.path.exists('leads.csv'))
-
-    driver.quit()
 
 if __name__ == "__main__":
     run_scraper()
