@@ -26,18 +26,17 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scraper.py
 
-      - name: Save & Commit Data
+      - name: Save Data (Fail-Safe)
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # Agar history.json hai to add karo
+          # Add all tracking files
           git add history.json || true
-          
-          # Agar leads.csv nahi bani (kyunki leads nahi mili), to error mat do
+          git add combinations.json || true
           git add leads.csv || true
           
-          # Agar koi changes hain to commit karo, warna "No changes" bolkar aage badho
-          git commit -m "Auto Update: Scraped Data" || echo "No changes to commit"
+          # Commit
+          git commit -m "Auto: Leads & Rotation Update" || echo "No new leads to save"
           
           git push
