@@ -4,36 +4,6 @@ import json
 import os
 import requests
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium_stealth import stealth
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from datetime import date
-
-# --- CONFIGURATION ---
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-
-# Topics aur Places ki list
-CITIES = ["New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Miami, FL", "Las Vegas, NV"]
-TOPICS = ["Salon", "Plumber", "Dentist", "Auto Repair", "Real Estate Agency", "Gym", "Florist", "Electrician"]
-
-def send_telegram(topic, lead):
-    msg = (
-        f"🟦 *{topic.upper()} LEAD* 🇺🇸\n\n"
-        f"🏪 *Name:* {lead['Name']}\n"
-        f"📞 *Phone:* `{lead['Phone']}`\n"
-        f"🌐 *Web:* {lead['WebsiteStatus']}\n"
-        f"⭐ *Rating:* {lead['Rating']} ({lead['Reviews']})\n"
-import time
-import random
-import json
-import os
-import requests
-import pandas as pd
 from datetime import date
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -94,29 +64,21 @@ def get_driver():
 
 # --- 🧠 SMART ROTATION LOGIC ---
 def get_smart_target():
-    # Load previous combinations
     if os.path.exists('combinations.json'):
         with open('combinations.json', 'r') as f: done_combos = json.load(f)
     else:
         done_combos = []
 
-    # Generate ALL possible combinations
     all_possible = [f"{city}|{topic}" for city in LOCATIONS for topic in TOPICS]
-    
-    # Filter out what is already done
     remaining = list(set(all_possible) - set(done_combos))
     
-    # Agar sab khatam ho gaya, to Reset karo (Infinite Loop)
     if not remaining:
-        print("🔄 All combinations completed! Resetting cycle.")
         done_combos = []
         remaining = all_possible
 
-    # Pick random from REMAINING (Not just random)
     selection = random.choice(remaining)
     city, topic = selection.split('|')
     
-    # Add to done list immediately
     done_combos.append(selection)
     with open('combinations.json', 'w') as f: json.dump(done_combos, f)
     
@@ -133,15 +95,12 @@ def run_scraper():
     attempts = 0
     scraped_data = []
 
-    # Retry Loop
     while total_leads_found < TARGET_LEADS and attempts < MAX_ATTEMPTS:
         attempts += 1
-        
-        # ✅ Get Unique Target via Rotation
         city, topic = get_smart_target()
         query = f"{topic} in {city}"
         
-        print(f"\n🔄 Attempt {attempts}: Searching '{query}' (Smart Rotation)")
+        print(f"\n🔄 Attempt {attempts}: Searching '{query}'")
         
         try:
             driver.get(f"https://www.google.com/maps/search/{query.replace(' ', '+')}")
@@ -175,7 +134,6 @@ def run_scraper():
                         reviews = rating_text.split("\n")[1]
                     except: rating = "N/A"; reviews = "(0)"
 
-                    # GOLD Logic
                     is_gold = False
                     status = "✅ Active"
                     
@@ -208,14 +166,12 @@ def run_scraper():
 
     driver.quit()
 
-    # Save History
     with open('history.json', 'w') as f: json.dump(history, f)
     
     if scraped_data:
         df = pd.DataFrame(scraped_data)
         df.to_csv('leads.csv', mode='a', index=False, header=not os.path.exists('leads.csv'))
 
-    # Report
     send_telegram(f"📊 *REPORT:* Checked {attempts} cities. Found {total_leads_found} GOLD leads.")
 
 if __name__ == "__main__":
