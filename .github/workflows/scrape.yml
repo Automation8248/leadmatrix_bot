@@ -1,42 +1,21 @@
-name: Daily Auto Scraper
+name: leadbot
+
 on:
   schedule:
-    - cron: '0 6 * * *' # Daily Run
-  workflow_dispatch: # Manual Run Button
+    - cron: "0 5 * * *"
+  workflow_dispatch:
 
 jobs:
-  run-scraper:
+  run:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
 
-      - name: Install Libraries
-        run: |
-          pip install selenium selenium-stealth webdriver-manager pandas requests
-
-      - name: Run Python Script
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scraper.py
-
-      - name: Save Data (Fail-Safe)
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Add all tracking files
-          git add history.json || true
-          git add combinations.json || true
-          git add leads.csv || true
-          
-          # Commit
-          git commit -m "Auto: Leads & Rotation Update" || echo "No new leads to save"
-          
-          git push
+    - run: pip install -r requirements.txt
+    - run: playwright install --with-deps
+    - run: python bot.py
