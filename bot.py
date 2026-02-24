@@ -31,10 +31,21 @@ def send(msg):
     requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}")
 
 def load_history():
-    if os.path.exists("history.csv"):
-        return pd.read_csv("history.csv")
-    return pd.DataFrame(columns=["phone"])
+    if not os.path.exists("history.csv"):
+        return pd.DataFrame(columns=["phone"])
 
+    try:
+        df = pd.read_csv("history.csv")
+
+        # agar column missing hai to fix
+        if "phone" not in df.columns:
+            df = pd.DataFrame(columns=["phone"])
+
+        return df
+
+    except:
+        return pd.DataFrame(columns=["phone"])
+        
 def save_history(df):
     df.to_csv("history.csv",index=False)
 
