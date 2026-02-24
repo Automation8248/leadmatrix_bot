@@ -4,8 +4,9 @@ import os
 import time
 from playwright.sync_api import sync_playwright
 
-TOKEN="PUT_TOKEN"
-CHAT_ID="PUT_CHAT_ID"
+
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 CITIES=[
 ("New York","USA",40.7128,-74.0060),
