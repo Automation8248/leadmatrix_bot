@@ -83,7 +83,7 @@ def scrape():
                 listings=page.locator('//div[contains(@class,"Nv2PK")]')
 
                 for i in range(min(listings.count(),10)):
-                    if len(leads)>=5:
+                    if len(leads)>=2:
                         break
 
                     listings.nth(i).click()
