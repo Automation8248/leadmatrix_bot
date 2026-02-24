@@ -1,5 +1,3 @@
-selenium
-selenium-stealth
-webdriver-manager
+playwright
 pandas
 requests
