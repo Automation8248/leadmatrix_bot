@@ -1,145 +1,172 @@
-import pandas as pd
-import requests
-import os
-import time
+import time, csv, os, requests
 from playwright.sync_api import sync_playwright
 
-
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-CITIES=[
-("New York","USA",40.7128,-74.0060),
-("Los Angeles","USA",34.0522,-118.2437),
-("Toronto","Canada",43.6510,-79.3470),
-("London","UK",51.5072,-0.1276),
-("Sydney","Australia",-33.8688,151.2093),
-("Dubai","UAE",25.2048,55.2708)
+CATEGORIES = [
+    "dentist",
+    "restaurant",
+    "clinic",
+    "plumber",
+    "real estate",
+    "lawyer"
 ]
 
-CATEGORIES=[
-"dental clinic",
-"chiropractor",
-"roofing contractor",
-"law firm",
-"hvac contractor",
-"med spa",
-"real estate agency"
+CITIES = [
+    "New York, USA",
+    "London, UK",
+    "Toronto, Canada",
+    "Sydney, Australia"
 ]
+
+CSV_FILE = "sent_leads.csv"
+
+
+# ---------------- TELEGRAM ---------------- #
 
 def send(msg):
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}")
+    url=f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url,data={"chat_id":CHAT_ID,"text":msg})
+
+
+# ---------------- HISTORY ---------------- #
 
 def load_history():
-    if not os.path.exists("history.csv"):
-        return pd.DataFrame(columns=["phone"])
+    if not os.path.exists(CSV_FILE):
+        return set()
+    with open(CSV_FILE,"r",encoding="utf8") as f:
+        return set(row[0] for row in csv.reader(f))
 
-    try:
-        df = pd.read_csv("history.csv")
 
-        # agar column missing hai to fix
-        if "phone" not in df.columns:
-            df = pd.DataFrame(columns=["phone"])
+def save_history(place_id):
+    with open(CSV_FILE,"a",newline="",encoding="utf8") as f:
+        csv.writer(f).writerow([place_id])
 
-        return df
 
-    except:
-        return pd.DataFrame(columns=["phone"])
-        
-def save_history(df):
-    df.to_csv("history.csv",index=False)
+# ---------------- MAP OPEN FIX ---------------- #
 
-def get_text(page,xpath):
-    try:
-        return page.locator(xpath).inner_text(timeout=2000)
-    except:
-        return ""
+def open_maps(page,url):
+    page.goto(url)
+    for _ in range(6):
+        try:
+            page.wait_for_selector('//input[@id="searchboxinput"]',timeout=5000)
+            return True
+        except:
+            page.reload()
+            time.sleep(5)
+    return False
+
+
+# ---------------- SCRAPER ---------------- #
 
 def scrape():
     history=load_history()
-    phones=set(history["phone"].astype(str))
-
     leads=[]
 
     with sync_playwright() as p:
-        browser=p.chromium.launch(headless=True)
+        browser=p.chromium.launch(headless=True,args=["--no-sandbox"])
         page=browser.new_page()
 
-        for city,country,lat,lon in CITIES:
+        for city in CITIES:
             for cat in CATEGORIES:
 
-                if len(leads)>=5:
+                if len(leads)>=2:
                     break
 
-                url=f"https://www.google.com/maps/@{lat},{lon},14z"
-                page.goto(url)
+                search=f"{cat} in {city}"
+                url=f"https://www.google.com/maps/search/{search.replace(' ','+')}"
+
+                print("Searching:",search)
+
+                if not open_maps(page,url):
+                    print("Map failed load")
+                    continue
+
                 time.sleep(5)
 
-                search=f"{cat} in {city}"
-                page.fill('//input[@id="searchboxinput"]',search)
-                page.keyboard.press("Enter")
-                time.sleep(6)
+                listings=page.locator('//a[contains(@href,"/maps/place")]')
 
-                listings=page.locator('//div[contains(@class,"Nv2PK")]')
+                count=min(listings.count(),15)
 
-                for i in range(min(listings.count(),10)):
+                for i in range(count):
+
                     if len(leads)>=2:
                         break
 
                     listings.nth(i).click()
                     time.sleep(4)
 
-                    name=get_text(page,'//h1')
-                    phone=get_text(page,'//button[contains(@data-item-id,"phone")]')
-                    address=get_text(page,'//button[contains(@data-item-id,"address")]')
-                    website=get_text(page,'//a[contains(@data-item-id,"authority")]')
-                    rating=get_text(page,'//span[@role="img"]')
+                    link=page.url
 
-                    if phone=="" or phone in phones:
+                    if link in history:
                         continue
+
+                    try:
+                        name=page.locator('//h1').inner_text()
+                    except:
+                        continue
+
+                    # WEBSITE CHECK (skip if exists)
+                    website=""
+                    try:
+                        website=page.locator('//a[contains(@data-item-id,"authority")]').inner_text()
+                    except:
+                        website=""
 
                     if website!="":
                         continue
 
-                    maplink=page.url
+                    # PHONE
+                    phone=""
+                    try:
+                        phone=page.locator('//button[contains(@data-item-id,"phone")]').inner_text()
+                    except:
+                        pass
 
-                    leads.append({
-                        "name":name,
-                        "phone":phone,
-                        "category":cat,
-                        "address":address,
-                        "city":city,
-                        "country":country,
-                        "map":maplink
-                    })
+                    # ADDRESS
+                    address=""
+                    try:
+                        address=page.locator('//button[contains(@data-item-id,"address")]').inner_text()
+                    except:
+                        pass
 
-                    phones.add(phone)
+                    lead=f"""
+NEW BUSINESS LEAD
+
+Name: {name}
+Category: {cat}
+City: {city}
+
+Phone: {phone}
+Address: {address}
+
+Map: {link}
+                    """
+
+                    leads.append(lead)
+                    save_history(link)
+                    history.add(link)
 
         browser.close()
 
-    return leads,phones
+    return leads
 
-def send_leads(leads):
+
+# ---------------- MAIN ---------------- #
+
+def main():
+    leads=scrape()
+
     if not leads:
         send("No new leads today")
         return
 
-    for L in leads:
-        msg=f"""
-🏢 {L['name']}
-📂 {L['category']}
-📍 {L['address']}
-🌎 {L['city']}, {L['country']}
-☎ {L['phone']}
-🗺 {L['map']}
-"""
-        send(msg)
-        time.sleep(3)
+    send(f"{len(leads)} New Leads Found")
 
-def main():
-    leads,phones=scrape()
-    send_leads(leads)
-    save_history(pd.DataFrame({"phone":list(phones)}))
+    for l in leads:
+        send(l)
+
 
 if __name__=="__main__":
     main()
