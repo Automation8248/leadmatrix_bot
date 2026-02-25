@@ -1,172 +1,67 @@
-import time, csv, os, requests
-from playwright.sync_api import sync_playwright
+import requests, os, csv
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-CATEGORIES = [
-    "dentist",
-    "restaurant",
-    "clinic",
-    "plumber",
-    "real estate",
-    "lawyer"
-]
+SEARCH_QUERY = "dentist in New York"
+MAX_LEADS = 2
 
-CITIES = [
-    "New York, USA",
-    "London, UK",
-    "Toronto, Canada",
-    "Sydney, Australia"
-]
-
-CSV_FILE = "sent_leads.csv"
-
-
-# ---------------- TELEGRAM ---------------- #
-
-def send(msg):
-    url=f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url,data={"chat_id":CHAT_ID,"text":msg})
-
-
-# ---------------- HISTORY ---------------- #
+def send_telegram(msg):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
 def load_history():
-    if not os.path.exists(CSV_FILE):
+    if not os.path.exists("history.csv"):
         return set()
-    with open(CSV_FILE,"r",encoding="utf8") as f:
+    with open("history.csv","r",encoding="utf-8") as f:
         return set(row[0] for row in csv.reader(f))
 
-
 def save_history(place_id):
-    with open(CSV_FILE,"a",newline="",encoding="utf8") as f:
+    with open("history.csv","a",newline="",encoding="utf-8") as f:
         csv.writer(f).writerow([place_id])
 
+def search_places():
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": API_KEY,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.types"
+    }
+    data = {"textQuery": SEARCH_QUERY}
+    r = requests.post(url, headers=headers, json=data)
+    return r.json().get("places", [])
 
-# ---------------- MAP OPEN FIX ---------------- #
-
-def open_maps(page,url):
-    page.goto(url)
-    for _ in range(6):
-        try:
-            page.wait_for_selector('//input[@id="searchboxinput"]',timeout=5000)
-            return True
-        except:
-            page.reload()
-            time.sleep(5)
-    return False
-
-
-# ---------------- SCRAPER ---------------- #
-
-def scrape():
-    history=load_history()
-    leads=[]
-
-    with sync_playwright() as p:
-        browser=p.chromium.launch(headless=True,args=["--no-sandbox"])
-        page=browser.new_page()
-
-        for city in CITIES:
-            for cat in CATEGORIES:
-
-                if len(leads)>=2:
-                    break
-
-                search=f"{cat} in {city}"
-                url=f"https://www.google.com/maps/search/{search.replace(' ','+')}"
-
-                print("Searching:",search)
-
-                if not open_maps(page,url):
-                    print("Map failed load")
-                    continue
-
-                time.sleep(5)
-
-                listings=page.locator('//a[contains(@href,"/maps/place")]')
-
-                count=min(listings.count(),15)
-
-                for i in range(count):
-
-                    if len(leads)>=2:
-                        break
-
-                    listings.nth(i).click()
-                    time.sleep(4)
-
-                    link=page.url
-
-                    if link in history:
-                        continue
-
-                    try:
-                        name=page.locator('//h1').inner_text()
-                    except:
-                        continue
-
-                    # WEBSITE CHECK (skip if exists)
-                    website=""
-                    try:
-                        website=page.locator('//a[contains(@data-item-id,"authority")]').inner_text()
-                    except:
-                        website=""
-
-                    if website!="":
-                        continue
-
-                    # PHONE
-                    phone=""
-                    try:
-                        phone=page.locator('//button[contains(@data-item-id,"phone")]').inner_text()
-                    except:
-                        pass
-
-                    # ADDRESS
-                    address=""
-                    try:
-                        address=page.locator('//button[contains(@data-item-id,"address")]').inner_text()
-                    except:
-                        pass
-
-                    lead=f"""
-NEW BUSINESS LEAD
-
-Name: {name}
-Category: {cat}
-City: {city}
-
+def format_msg(p):
+    name = p.get("displayName",{}).get("text","N/A")
+    phone = p.get("nationalPhoneNumber","N/A")
+    address = p.get("formattedAddress","N/A")
+    website = p.get("websiteUri","Not Available")
+    category = ", ".join(p.get("types",[]))
+    map_link = f"https://www.google.com/maps/place/?q=place_id:{p['id']}"
+    return f"""Business: {name}
+Category: {category}
 Phone: {phone}
 Address: {address}
-
-Map: {link}
-                    """
-
-                    leads.append(lead)
-                    save_history(link)
-                    history.add(link)
-
-        browser.close()
-
-    return leads
-
-
-# ---------------- MAIN ---------------- #
+Website: {website}
+Map: {map_link}"""
 
 def main():
-    leads=scrape()
+    history = load_history()
+    places = search_places()
+    sent = 0
 
-    if not leads:
-        send("No new leads today")
-        return
+    for p in places:
+        if sent >= MAX_LEADS:
+            break
+        if p["id"] in history:
+            continue
+        if p.get("websiteUri"):
+            continue
 
-    send(f"{len(leads)} New Leads Found")
+        send_telegram(format_msg(p))
+        save_history(p["id"])
+        sent += 1
 
-    for l in leads:
-        send(l)
-
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
