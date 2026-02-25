@@ -1,29 +1,29 @@
-name: Lead Bot
+name: USA Lead Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '30 13 * * *' # Har din shaam 7:00 PM IST (USA Morning) par chalega
+  workflow_dispatch:      # Manual button run karne ke liye
 
 jobs:
-  run:
+  run-scraper:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.9'
 
-      - name: Install deps
-        run: pip install requests
+      - name: Install Tools
+        run: |
+          pip install playwright requests
+          playwright install chromium
 
-      - name: Run bot
-        run: python main.py
+      - name: Start Scraping
         env:
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scraper.py
