@@ -1,97 +1,83 @@
-import requests, os, csv
+import os
+import time
+import random
+import requests
+from playwright.sync_api import sync_playwright
 
-API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+# Configuration
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-MAX_LEADS = 2
-
-# Multiple Tier-1 search targets (low-website probability niches)
-SEARCH_QUERIES = [
-    "plumber in Texas USA",
-    "locksmith in Toronto Canada",
-    "tow truck in California USA",
-    "tree service in Sydney Australia",
-    "roof repair in London UK",
-    "carpet cleaner in Dublin Ireland"
-]
-
-# ---------------- TELEGRAM ----------------
-def send_telegram(msg):
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
-# ---------------- HISTORY ----------------
-def load_history():
-    if not os.path.exists("history.csv"):
-        return set()
-    with open("history.csv","r",encoding="utf-8") as f:
-        return set(row[0] for row in csv.reader(f))
+def scrape_maps():
+    # USA Target Locations & Niches
+    cities = ["New York", "Los Angeles", "Chicago", "Houston", "Miami", "Dallas"]
+    niches = ["Roofing Contractors", "Plumbing Services", "HVAC Repair", "Landscaping"]
+    
+    query = f"{random.choice(niches)} in {random.choice(cities)}"
+    print(f"Searching for: {query}")
 
-def save_history(place_id):
-    with open("history.csv","a",newline="",encoding="utf-8") as f:
-        csv.writer(f).writerow([place_id])
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        # Real user browser simulate karne ke liye
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            viewport={'width': 1280, 'height': 720}
+        )
+        page = context.new_page()
+        
+        # Google Maps URL
+        search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+        page.goto(search_url)
+        page.wait_for_timeout(5000) # Wait for results to load
 
-# ---------------- GOOGLE API ----------------
-def search_places(query):
-    url = "https://places.googleapis.com/v1/places:searchText"
+        leads_found = 0
+        # Maps par results ke containers
+        items = page.query_selector_all('div[role="article"]')
 
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": API_KEY,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.types"
-    }
-
-    data = {"textQuery": query}
-
-    r = requests.post(url, headers=headers, json=data)
-    if r.status_code != 200:
-        return []
-
-    return r.json().get("places", [])
-
-# ---------------- FORMAT ----------------
-def format_msg(p):
-    name = p.get("displayName",{}).get("text","N/A")
-    phone = p.get("nationalPhoneNumber","N/A")
-    address = p.get("formattedAddress","N/A")
-    website = p.get("websiteUri","Not Available")
-    category = ", ".join(p.get("types",[]))
-    map_link = f"https://www.google.com/maps/place/?q=place_id:{p['id']}"
-
-    return f"""Business: {name}
-Category: {category}
-Phone: {phone}
-Address: {address}
-Website: {website}
-Map: {map_link}"""
-
-# ---------------- MAIN ----------------
-def main():
-    history = load_history()
-    sent = 0
-
-    for query in SEARCH_QUERIES:
-        if sent >= MAX_LEADS:
-            break
-
-        places = search_places(query)
-
-        for p in places:
-            if sent >= MAX_LEADS:
+        for item in items:
+            if leads_found >= 2: # Daily Limit 2 Leads
                 break
 
-            # Skip duplicates
-            if p["id"] in history:
-                continue
+            # Logic: Website button agar nahi hai
+            website_btn = item.query_selector('a[aria-label*="website"]')
+            
+            if not website_btn:
+                try:
+                    # Lead Details
+                    name_el = item.query_selector('.qBF1Pd')
+                    name = name_el.inner_text() if name_el else "Unknown Business"
+                    
+                    item.click() # Click to open details sidebar
+                    page.wait_for_timeout(3000)
+                    
+                    # Scrape Details from Sidebar
+                    address = page.query_selector('button[data-item-id="address"]').inner_text() if page.query_selector('button[data-item-id="address"]') else "Address not found"
+                    phone = page.query_selector('button[data-item-id*="phone"]').inner_text() if page.query_selector('button[data-item-id*="phone"]') else "No Phone"
+                    map_url = page.url
 
-            # Skip businesses with website
-            if p.get("websiteUri"):
-                continue
+                    message = (
+                        f"🔥 *New USA Lead (No Website)*\n\n"
+                        f"🏢 *Name:* {name}\n"
+                        f"📞 *Phone:* {phone}\n"
+                        f"📍 *Address:* {address}\n"
+                        f"🌍 [Open in Maps]({map_url})"
+                    )
+                    
+                    send_telegram(message)
+                    leads_found += 1
+                except Exception as e:
+                    print(f"Error skipping one item: {e}")
+                    continue
 
-            send_telegram(format_msg(p))
-            save_history(p["id"])
-            sent += 1
+        browser.close()
 
 if __name__ == "__main__":
-    main()
+    scrape_maps()
